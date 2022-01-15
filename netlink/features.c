@@ -82,8 +82,17 @@ static void dump_feature(const struct feature_results *results,
 		 feature_on(results->wanted, idx))
 		suffix = feature_on(results->wanted, idx) ?
 			" [requested on]" : " [requested off]";
-	printf("%s%s: %s%s\n", prefix, name,
+
+	if (is_json_context()) {
+		char *name_suffix = malloc(strlen(name)+strlen("-opt")+1);
+		sprintf(name_suffix, "%s-opt", name);
+		print_bool(PRINT_JSON, name, NULL, feature_on(results->active, idx));
+		print_string(PRINT_JSON, name_suffix, NULL, suffix);
+		free(name_suffix);
+	} else {
+		printf("%s%s: %s%s\n", prefix, name,
 	       feature_on(results->active, idx) ? "on" : "off", suffix);
+	}
 }
 
 /* this assumes pattern contains no more than one asterisk */
@@ -153,9 +162,14 @@ int dump_features(const struct nlattr *const *tb,
 					feature_on(results.active, j);
 			}
 		}
-		if (n_match != 1)
-			printf("%s: %s\n", off_flag_def[i].long_name,
+		if (n_match != 1) {
+			if (is_json_context()) {
+				print_bool(PRINT_JSON, off_flag_def[i].long_name, NULL, flag_value);
+			} else {
+				printf("%s: %s\n", off_flag_def[i].long_name,
 			       flag_value ? "on" : "off");
+			}
+		}
 		if (n_match == 0)
 			continue;
 		for (j = 0; j < results.count; j++) {
@@ -210,8 +224,11 @@ int features_reply_cb(const struct nlmsghdr *nlhdr, void *data)
 
 	if (silent)
 		putchar('\n');
-	printf("Features for %s:\n", nlctx->devname);
+	open_json_object(NULL);
+	print_string(PRINT_ANY, "ifname", "Features for %s:\n",
+                     nlctx->devname);
 	ret = dump_features(tb, feature_names);
+	close_json_object();
 	return (silent || !ret) ? MNL_CB_OK : MNL_CB_ERROR;
 }
 
@@ -232,9 +249,14 @@ int nl_gfeatures(struct cmd_context *ctx)
 	ret = nlsock_prep_get_request(nlsk, ETHTOOL_MSG_FEATURES_GET,
 				      ETHTOOL_A_FEATURES_HEADER,
 				      ETHTOOL_FLAG_COMPACT_BITSETS);
+
 	if (ret < 0)
 		return ret;
-	return nlsock_send_get_request(nlsk, features_reply_cb);
+	new_json_obj(ctx->json);
+	ret = nlsock_send_get_request(nlsk, features_reply_cb);
+
+	delete_json_obj();
+	return ret;
 }
 
 /* FEATURES_SET */
